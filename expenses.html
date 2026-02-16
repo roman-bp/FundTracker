@@ -10,6 +10,8 @@
 
 <div class="top">
   <b>Витрати (по місяцях)</b>
+  <button class="btn" onclick="toggleTheme()">🌙 / ☀️</button>
+
   <span class="muted">Клік по місяцю → список витрат + додати/видалити</span>
 
   <select id="year"></select>
@@ -251,6 +253,23 @@ yearSel.onchange = loadTable;
 
 initYears();
 loadTable();
+</script>
+<script>
+function toggleTheme(){
+  document.body.classList.toggle('light');
+
+  localStorage.setItem(
+    'theme',
+    document.body.classList.contains('light') ? 'light' : 'dark'
+  );
+}
+
+/* запамʼятовує тему */
+(function(){
+  if(localStorage.getItem('theme') === 'light'){
+    document.body.classList.add('light');
+  }
+})();
 </script>
 
 </body>
