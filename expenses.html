@@ -20,7 +20,6 @@
   <a href="index.html" class="btn navbtn">← Внески</a>
   <a href="balance.html" class="btn navbtn">Каса</a>
 
-
   <span id="toast" class="toast"></span>
 </div>
 
@@ -53,7 +52,7 @@
 </div>
 
 <script>
-const API = "http://jq.zzz.com.ua/api";
+const API = "https://jq.zzz.com.ua/api";
 const monthNames = ["", "Січ", "Лют", "Бер", "Квіт", "Трав", "Чер", "Лип", "Серп", "Вер", "Жовт", "Лист", "Груд"];
 
 const yearSel = document.getElementById("year");
@@ -229,7 +228,6 @@ addBtn.onclick = async ()=>{
   }
 };
 
-/* ✅ ЛОВИМО КЛІКИ НА ТАБЛИЦІ (навіть якщо onclick не працює) */
 tbl.addEventListener("click", (e)=>{
   const cell = e.target.closest("td[data-month]");
   if(cell){
@@ -238,7 +236,6 @@ tbl.addEventListener("click", (e)=>{
   }
 });
 
-/* ✅ ЛОВИМО КЛІКИ “ВИДАЛИТИ” В СПИСКУ */
 listBox.addEventListener("click", (e)=>{
   const btn = e.target.closest("button[data-del]");
   if(btn){
@@ -264,7 +261,6 @@ function toggleTheme(){
   );
 }
 
-/* запамʼятовує тему */
 (function(){
   if(localStorage.getItem('theme') === 'light'){
     document.body.classList.add('light');

@@ -56,7 +56,7 @@
   </div>
 
 <script>
-const API = "http://jq.zzz.com.ua/api";
+const API = "https://jq.zzz.com.ua/api";
 const monthNames = ["", "Січ", "Лют", "Бер", "Квіт", "Трав", "Чер", "Лип", "Серп", "Вер", "Жовт", "Лист", "Груд"];
 
 const yearSel = document.getElementById("year");
@@ -146,12 +146,10 @@ function escapeHtml(s){
 function escapeAttr(s){ return escapeHtml(s).replaceAll("\n"," "); }
 
 function renderNormText(rules){
-  // красиво показуємо: "Січ–Бер 400, Квіт–Груд 500"
   if(!rules || rules.length === 0){
     normText.textContent = "400 (дефолт)";
     return;
   }
-  // робимо сегменти по normByMonth
   const segs = [];
   let start = 1;
   let curN = normByMonth[1];
@@ -181,7 +179,6 @@ async function loadNorms(){
     normByMonth = data.norm_by_month;
     renderNormText(data.rules || []);
   }else{
-    // fallback
     normByMonth = {};
     for(let m=1;m<=12;m++) normByMonth[m] = 400;
     normText.textContent = "400 (дефолт)";
@@ -386,14 +383,12 @@ function toggleTheme(){
   );
 }
 
-/* запамʼятовує тему */
 (function(){
   if(localStorage.getItem('theme') === 'light'){
     document.body.classList.add('light');
   }
 })();
 </script>
-
 
 </body>
 </html>
