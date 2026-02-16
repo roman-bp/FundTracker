@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Внески — Таблиця</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <div class="top">
+    <b>Таблиця внесків</b>
+
+    <button class="btn" onclick="toggleTheme()">🌙 / ☀️</button>
+
+    <span class="muted">Клік по клітинці → оплати + додати/видалити</span>
+
+    <select id="year"></select>
+    <button id="reload" class="btn">Оновити</button>
+
+    <a href="expenses.html" class="btn navbtn">Витрати →</a>
+    <a href="balance.html" class="btn navbtn">Каса</a>
+    <a href="norms.html" class="btn navbtn">Норма</a>
+
+    <button id="addPerson" class="btn">+ Людина</button>
+
+    <span class="badge">Норми: <b id="normText">—</b></span>
+    <span id="toast" class="toast"></span>
+  </div>
+
+  <div class="wrap">
+    <table id="tbl"></table>
+  </div>
+
+  <!-- Modal (внески) -->
+  <div class="modal" id="modal">
+    <div class="card">
+      <div class="row">
+        <b id="mTitle">Внески</b>
+        <button id="mClose" class="btn" style="flex:0 0 auto;">Закрити</button>
+      </div>
+
+      <div class="row mt10">
+        <input id="pay_date" type="date" />
+        <input id="amount" type="number" placeholder="Сума (грн)" />
+        <input id="note" type="text" placeholder="Примітка (необовʼязково)" />
+        <button id="addBtn" class="btn" style="flex:0 0 auto;">Додати</button>
+      </div>
+
+      <div class="list" id="list"></div>
+
+      <div class="right mt10">
+        <b>Разом за місяць: <span id="mTotal">0</span></b>
+      </div>
+    </div>
+  </div>
+
+<script>
+const API = "http://jq.zzz.com.ua/api";
+const monthNames = ["", "Січ", "Лют", "Бер", "Квіт", "Трав", "Чер", "Лип", "Серп", "Вер", "Жовт", "Лист", "Груд"];
+
+const yearSel = document.getElementById("year");
+const tbl = document.getElementById("tbl");
+const modal = document.getElementById("modal");
+const mTitle = document.getElementById("mTitle");
+const listBox = document.getElementById("list");
+const mTotal = document.getElementById("mTotal");
+const payDate = document.getElementById("pay_date");
+const amount = document.getElementById("amount");
+const note = document.getElementById("note");
+const addBtn = document.getElementById("addBtn");
+const toast = document.getElementById("toast");
+const addPersonBtn = document.getElementById("addPerson");
+const normText = document.getElementById("normText");
+
+let cur = { person_id: null, year: null, month: null, person_name: "" };
+let adding = false;
+let deleting = new Set();
+let deletingPeople = new Set();
+
+// норми по місяцях
+let normByMonth = {};
+for(let m=1;m<=12;m++) normByMonth[m] = 400;
+
+function pad(n){ return String(n).padStart(2,"0"); }
+function todayISO(){
+  const d = new Date();
+  return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate());
+}
+function showToast(text){
+  toast.textContent = text;
+  toast.classList.add("on");
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(()=>toast.classList.remove("on"), 1700);
+}
+
+function initYears(){
+  const now = new Date().getFullYear();
+  const years = [now-1, now, now+1];
+  yearSel.innerHTML = years.map(y => `<option value="${y}">${y}</option>`).join("");
+  yearSel.value = now;
+}
+
+async function getJSON(url){
+  const r = await fetch(url, { cache: "no-store" });
+  return await r.json();
+}
+async function postJSON(url, data){
+  const r = await fetch(url, {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify(data),
+    cache: "no-store"
+  });
+  return await r.json();
+}
+
+function cellClass(sum, norm){
+  const s = Number(sum) || 0;
+  const n = Number(norm) || 0;
+  if (s <= 0) return "cell cell-bad";
+  if (n > 0 && s < n) return "cell cell-warn";
+  return "cell cell-ok";
+}
+
+function yearNeed(){
+  let need = 0;
+  for(let m=1;m<=12;m++) need += Number(normByMonth[m] || 0);
+  return need;
+}
+
+function sumRow(months){
+  let t = 0;
+  for(let m=1;m<=12;m++) t += Number(months[m]||0);
+  return t;
+}
+
+function escapeHtml(s){
+  return String(s ?? "")
+    .replaceAll("&","&amp;")
+    .replaceAll("<","&lt;")
+    .replaceAll(">","&gt;")
+    .replaceAll('"',"&quot;")
+    .replaceAll("'","&#039;");
+}
+function escapeAttr(s){ return escapeHtml(s).replaceAll("\n"," "); }
+
+function renderNormText(rules){
+  // красиво показуємо: "Січ–Бер 400, Квіт–Груд 500"
+  if(!rules || rules.length === 0){
+    normText.textContent = "400 (дефолт)";
+    return;
+  }
+  // робимо сегменти по normByMonth
+  const segs = [];
+  let start = 1;
+  let curN = normByMonth[1];
+  for(let m=2;m<=12;m++){
+    const n = normByMonth[m];
+    if(n !== curN){
+      segs.push({from:start, to:m-1, n:curN});
+      start = m;
+      curN = n;
+    }
+  }
+  segs.push({from:start, to:12, n:curN});
+
+  const mName = (m)=>monthNames[m];
+  const parts = segs.map(s=>{
+    const range = (s.from===s.to) ? mName(s.from) : `${mName(s.from)}–${mName(s.to)}`;
+    return `${range} ${s.n}`;
+  });
+
+  normText.textContent = parts.join(", ");
+}
+
+async function loadNorms(){
+  const year = yearSel.value;
+  const data = await getJSON(`${API}/norms_effective.php?year=${year}`);
+  if(data && data.ok && data.norm_by_month){
+    normByMonth = data.norm_by_month;
+    renderNormText(data.rules || []);
+  }else{
+    // fallback
+    normByMonth = {};
+    for(let m=1;m<=12;m++) normByMonth[m] = 400;
+    normText.textContent = "400 (дефолт)";
+  }
+}
+
+async function loadTable(){
+  await loadNorms();
+
+  const year = yearSel.value;
+  const data = await getJSON(`${API}/contrib_matrix.php?year=${year}`);
+  if(!data.ok){ alert("Помилка завантаження"); return; }
+
+  const {people, rows, totals} = data;
+
+  let html = "<tr><th>Людина</th><th>Рік</th>";
+  for(let m=1;m<=12;m++){
+    html += `<th>${monthNames[m]}<div class="muted">норма ${escapeHtml(String(normByMonth[m]||0))}</div></th>`;
+  }
+  html += "</tr>";
+
+  const needYear = yearNeed();
+
+  for(const p of people){
+    const months = rows[p.id] || {};
+    const paid = sumRow(months);
+    const debt = Math.max(0, needYear - paid);
+
+    const isDel = deletingPeople.has(Number(p.id));
+    const dis = isDel ? "disabled" : "";
+
+    html += `<tr>`;
+    html += `
+      <td class="name">
+        <div class="nameRow">
+          <span>${escapeHtml(p.full_name)}</span>
+          <button class="btn mini danger" ${dis} onclick="deletePerson(${p.id},'${escapeAttr(p.full_name)}')">✕</button>
+        </div>
+      </td>
+    `;
+
+    html += `<td class="yearcell"><b>${paid}</b> / ${needYear} <span class="muted">(-${debt})</span></td>`;
+
+    for(let m=1;m<=12;m++){
+      const sum = months[m] ? months[m] : 0;
+      const cls = cellClass(sum, normByMonth[m]);
+      const text = sum ? sum : "";
+      html += `<td class="${cls}" onclick="openCell(${p.id},'${escapeAttr(p.full_name)}',${m})">${text}</td>`;
+    }
+    html += `</tr>`;
+  }
+
+  html += `<tr><th>Разом</th><th></th>`;
+  for(let m=1;m<=12;m++){
+    const t = totals[m] || 0;
+    html += `<th>${t ? t : ""}</th>`;
+  }
+  html += "</tr>";
+
+  tbl.innerHTML = html;
+}
+
+async function openCell(person_id, person_name, month){
+  cur = { person_id, year: yearSel.value, month, person_name };
+  modal.classList.add("on");
+  mTitle.textContent = `${person_name} — ${monthNames[month]} ${cur.year} (норма ${normByMonth[month]||0})`;
+  payDate.value = todayISO();
+  amount.value = "";
+  note.value = "";
+  await loadList();
+}
+
+async function loadList(){
+  const {person_id,year,month} = cur;
+  const data = await getJSON(`${API}/contrib_list.php?person_id=${person_id}&year=${year}&month=${month}`);
+  if(!data.ok){ listBox.innerHTML=""; mTotal.textContent="0"; return; }
+
+  mTotal.textContent = data.total;
+
+  listBox.innerHTML = (data.items || []).map(i=>{
+    const dis = deleting.has(i.id) ? "disabled" : "";
+    return `
+      <div class="item">
+        <div class="item-left">
+          <div><b>${escapeHtml(i.pay_date)}</b> ${i.note ? escapeHtml(i.note) : ""}</div>
+          <div class="muted">id: ${escapeHtml(String(i.id))}</div>
+        </div>
+        <div class="item-right">
+          <div><b>${escapeHtml(String(i.amount))}</b></div>
+          <button class="btn danger" ${dis} onclick="deletePay(${i.id})">Видалити</button>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+window.deletePay = async (id)=>{
+  if(deleting.has(id)) return;
+  if(!confirm("Видалити цей внесок?")) return;
+
+  deleting.add(id);
+  await loadList();
+
+  const res = await postJSON(`${API}/contrib_delete.php`, { id });
+
+  deleting.delete(id);
+
+  if(res.ok){
+    showToast("Видалено ✅");
+    await loadList();
+    await loadTable();
+  }else{
+    alert(res.error ? ("Помилка: " + res.error) : "Помилка видалення");
+    await loadList();
+  }
+};
+
+addBtn.onclick = async ()=>{
+  const v = Number(amount.value);
+  if(!v || v <= 0) return;
+
+  if(adding) return;
+  adding = true;
+  addBtn.disabled = true;
+
+  const res = await postJSON(`${API}/contrib_add.php`,{
+    person_id: cur.person_id,
+    pay_date: payDate.value,
+    amount: v,
+    note: note.value
+  });
+
+  adding = false;
+  addBtn.disabled = false;
+
+  if(res.ok){
+    showToast("Додано ✅");
+    amount.value = "";
+    note.value = "";
+    await loadList();
+    await loadTable();
+  }else{
+    alert(res.error ? ("Помилка: " + res.error) : "Помилка додавання");
+  }
+};
+
+window.deletePerson = async (id, name)=>{
+  if(deletingPeople.has(id)) return;
+  if(!confirm(`Видалити людину "${name}"?\nУсі її внески теж зникнуть.`)) return;
+
+  deletingPeople.add(id);
+  await loadTable();
+
+  const res = await postJSON(`${API}/people_delete.php`, { id });
+
+  deletingPeople.delete(id);
+
+  if(res.ok){
+    showToast("Людину видалено ✅");
+    await loadTable();
+  }else{
+    alert(res.error ? ("Помилка: " + res.error) : "Помилка видалення людини");
+    await loadTable();
+  }
+};
+
+addPersonBtn.onclick = async ()=>{
+  const name = prompt("Імʼя людини (обовʼязково):");
+  if(!name) return;
+
+  const phone = prompt("Телефон (можна пусто):") || "";
+
+  const res = await postJSON(`${API}/people_add.php`, {
+    full_name: name.trim(),
+    phone: phone.trim(),
+    status: 1
+  });
+
+  if(res.ok){
+    showToast("Людину додано ✅");
+    await loadTable();
+  }else{
+    alert(res.error ? ("Помилка: " + res.error) : "Помилка додавання людини");
+  }
+};
+
+document.getElementById("mClose").onclick = ()=> modal.classList.remove("on");
+document.getElementById("reload").onclick = loadTable;
+yearSel.onchange = loadTable;
+
+initYears();
+loadTable();
+</script>
+
+<script>
+function toggleTheme(){
+  document.body.classList.toggle('light');
+
+  localStorage.setItem(
+    'theme',
+    document.body.classList.contains('light') ? 'light' : 'dark'
+  );
+}
+
+/* запамʼятовує тему */
+(function(){
+  if(localStorage.getItem('theme') === 'light'){
+    document.body.classList.add('light');
+  }
+})();
+</script>
+
+
+</body>
+</html>

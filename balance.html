@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <title>Каса</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="top">
+  <b>Каса (живі гроші)</b>
+
+  <select id="year"></select>
+  <button id="reload" class="btn">Оновити</button>
+
+  <a href="index.html" class="btn navbtn">Внески</a>
+  <a href="expenses.html" class="btn navbtn">Витрати</a>
+  <a href="balance.html" class="btn navbtn">Каса</a>
+
+</div>
+
+<div class="wrap" style="padding:30px">
+
+  <div class="balance-box">
+    <div class="line">
+      <span>Внески:</span>
+      <b id="in">0</b>
+    </div>
+
+    <div class="line">
+      <span>Витрати:</span>
+      <b id="out">0</b>
+    </div>
+
+    <hr>
+
+    <div class="line total">
+      <span>Залишок:</span>
+      <b id="total">0</b>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const API = "http://jq.zzz.com.ua/api";
+
+const yearSel = document.getElementById("year");
+
+function initYears(){
+  const y = new Date().getFullYear();
+  yearSel.innerHTML = [y-1,y,y+1].map(v=>`<option>${v}</option>`).join("");
+  yearSel.value = y;
+}
+
+async function getJSON(url){
+  const r = await fetch(url);
+  return await r.json();
+}
+
+async function load(){
+  const year = yearSel.value;
+
+  const contrib = await getJSON(`${API}/contrib_sum.php?year=${year}`);
+  const expense = await getJSON(`${API}/expense_sum.php?year=${year}`);
+
+  const inSum = contrib.total || 0;
+  const outSum = expense.total || 0;
+  const total = inSum - outSum;
+
+  document.getElementById("in").textContent = inSum;
+  document.getElementById("out").textContent = outSum;
+  document.getElementById("total").textContent = total;
+}
+
+yearSel.onchange = load;
+document.getElementById("reload").onclick = load;
+
+initYears();
+load();
+</script>
+
+</body>
+</html>

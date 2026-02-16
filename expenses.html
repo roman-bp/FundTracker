@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Витрати — по місяцях</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="top">
+  <b>Витрати (по місяцях)</b>
+  <span class="muted">Клік по місяцю → список витрат + додати/видалити</span>
+
+  <select id="year"></select>
+  <button id="reload" class="btn">Оновити</button>
+
+  <a href="index.html" class="btn navbtn">← Внески</a>
+  <a href="balance.html" class="btn navbtn">Каса</a>
+
+
+  <span id="toast" class="toast"></span>
+</div>
+
+<div class="wrap">
+  <table id="tbl"></table>
+</div>
+
+<!-- Modal -->
+<div class="modal" id="modal">
+  <div class="card">
+    <div class="row">
+      <b id="mTitle">Витрати</b>
+      <button id="mClose" class="btn" style="flex:0 0 auto;">Закрити</button>
+    </div>
+
+    <div class="row mt10">
+      <input id="spend_date" type="date" />
+      <input id="amount" type="number" placeholder="Сума (грн)" />
+      <input id="category" type="text" placeholder="Категорія (паливо/їжа/ремонт…)" />
+      <input id="note" type="text" placeholder="Примітка (необовʼязково)" />
+      <button id="addBtn" class="btn" style="flex:0 0 auto;">Додати</button>
+    </div>
+
+    <div class="list" id="list"></div>
+
+    <div class="right mt10">
+      <b>Разом за місяць: <span id="mTotal">0</span></b>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = "http://jq.zzz.com.ua/api";
+const monthNames = ["", "Січ", "Лют", "Бер", "Квіт", "Трав", "Чер", "Лип", "Серп", "Вер", "Жовт", "Лист", "Груд"];
+
+const yearSel = document.getElementById("year");
+const tbl = document.getElementById("tbl");
+const modal = document.getElementById("modal");
+const mTitle = document.getElementById("mTitle");
+const listBox = document.getElementById("list");
+const mTotal = document.getElementById("mTotal");
+const spendDate = document.getElementById("spend_date");
+const amount = document.getElementById("amount");
+const category = document.getElementById("category");
+const note = document.getElementById("note");
+const addBtn = document.getElementById("addBtn");
+const toast = document.getElementById("toast");
+
+let cur = { year: null, month: null };
+let adding = false;
+let deleting = new Set();
+
+function pad(n){ return String(n).padStart(2,"0"); }
+function todayISO(){
+  const d = new Date();
+  return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate());
+}
+function showToast(text){
+  toast.textContent = text;
+  toast.classList.add("on");
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(()=>toast.classList.remove("on"), 1600);
+}
+function escapeHtml(s){
+  return String(s ?? "")
+    .replaceAll("&","&amp;")
+    .replaceAll("<","&lt;")
+    .replaceAll(">","&gt;")
+    .replaceAll('"',"&quot;")
+    .replaceAll("'","&#039;");
+}
+
+async function getJSON(url){
+  const r = await fetch(url, { cache: "no-store" });
+  return await r.json();
+}
+async function postJSON(url, data){
+  const r = await fetch(url, {
+    method:"POST",
+    headers:{ "Content-Type":"application/json" },
+    body: JSON.stringify(data),
+    cache: "no-store"
+  });
+  return await r.json();
+}
+
+function initYears(){
+  const now = new Date().getFullYear();
+  const years = [now-1, now, now+1];
+  yearSel.innerHTML = years.map(y => `<option value="${y}">${y}</option>`).join("");
+  yearSel.value = now;
+}
+
+function renderTable(monthsObj, grandTotal){
+  let html = "<tr><th>Місяць</th><th>Витрати</th></tr>";
+  for(let m=1;m<=12;m++){
+    const s = monthsObj && monthsObj[m] ? Number(monthsObj[m]) : 0;
+    const cls = s ? "cell cell-warn cell-click" : "cell cell-bad cell-click";
+    const txt = s ? s : "";
+    html += `
+      <tr>
+        <td class="name">${monthNames[m]}</td>
+        <td class="${cls}" data-month="${m}">${txt}</td>
+      </tr>
+    `;
+  }
+  html += `<tr><th>Разом</th><th>${grandTotal ? grandTotal : ""}</th></tr>`;
+  tbl.innerHTML = html;
+}
+
+async function loadTable(){
+  const year = yearSel.value;
+  const data = await getJSON(`${API}/expense_matrix.php?year=${year}`);
+  if(!data || !data.ok){
+    renderTable({}, 0);
+    return;
+  }
+  renderTable(data.months || {}, data.grand_total || 0);
+}
+
+async function openMonth(month){
+  cur = { year: yearSel.value, month };
+  modal.classList.add("on");
+  mTitle.textContent = `${monthNames[month]} ${cur.year}`;
+  spendDate.value = todayISO();
+  amount.value = "";
+  category.value = "";
+  note.value = "";
+  await loadList();
+}
+
+async function loadList(){
+  const data = await getJSON(`${API}/expense_list.php?year=${cur.year}&month=${cur.month}`);
+  if(!data || !data.ok){
+    listBox.innerHTML = `<div class="muted">Немає даних.</div>`;
+    mTotal.textContent = "0";
+    return;
+  }
+
+  mTotal.textContent = data.total || 0;
+
+  listBox.innerHTML = (data.items || []).map(i=>{
+    const dis = deleting.has(i.id) ? "disabled" : "";
+    return `
+      <div class="item">
+        <div class="item-left">
+          <div><b>${escapeHtml(i.spend_date)}</b> ${i.category ? ("— " + escapeHtml(i.category)) : ""}</div>
+          <div class="muted">${i.note ? escapeHtml(i.note) : ""} <span class="muted">id: ${escapeHtml(String(i.id))}</span></div>
+        </div>
+        <div class="item-right">
+          <div><b>${escapeHtml(String(i.amount))}</b></div>
+          <button class="btn danger" ${dis} data-del="${i.id}">Видалити</button>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+async function deleteExpense(id){
+  if(deleting.has(id)) return;
+  if(!confirm("Видалити цю витрату?")) return;
+
+  deleting.add(id);
+  await loadList();
+
+  const res = await postJSON(`${API}/expense_delete.php`, { id });
+
+  deleting.delete(id);
+
+  if(res && res.ok){
+    showToast("Видалено ✅");
+    await loadList();
+    await loadTable();
+  }else{
+    alert(res && res.error ? ("Помилка: " + res.error) : "Помилка видалення");
+    await loadList();
+  }
+}
+
+addBtn.onclick = async ()=>{
+  const v = Number(amount.value);
+  if(!v || v <= 0) return;
+
+  if(adding) return;
+  adding = true;
+  addBtn.disabled = true;
+
+  const res = await postJSON(`${API}/expense_add.php`,{
+    spend_date: spendDate.value,
+    amount: v,
+    category: category.value,
+    note: note.value
+  });
+
+  adding = false;
+  addBtn.disabled = false;
+
+  if(res && res.ok){
+    showToast("Додано ✅");
+    amount.value = "";
+    note.value = "";
+    await loadList();
+    await loadTable();
+  }else{
+    alert(res && res.error ? ("Помилка: " + res.error) : "Помилка додавання");
+  }
+};
+
+/* ✅ ЛОВИМО КЛІКИ НА ТАБЛИЦІ (навіть якщо onclick не працює) */
+tbl.addEventListener("click", (e)=>{
+  const cell = e.target.closest("td[data-month]");
+  if(cell){
+    const m = Number(cell.dataset.month);
+    if(m>=1 && m<=12) openMonth(m);
+  }
+});
+
+/* ✅ ЛОВИМО КЛІКИ “ВИДАЛИТИ” В СПИСКУ */
+listBox.addEventListener("click", (e)=>{
+  const btn = e.target.closest("button[data-del]");
+  if(btn){
+    const id = Number(btn.dataset.del);
+    if(id>0) deleteExpense(id);
+  }
+});
+
+document.getElementById("mClose").onclick = ()=> modal.classList.remove("on");
+document.getElementById("reload").onclick = loadTable;
+yearSel.onchange = loadTable;
+
+initYears();
+loadTable();
+</script>
+
+</body>
+</html>
